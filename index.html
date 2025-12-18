@@ -2,34 +2,44 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>스마트 배차 Pro - 차량 분할 적재 수정판</title>
+    <title>스마트 배차 Pro - 실시간 데이터 연동</title>
     <style>
         body { margin: 0; display: flex; font-family: 'Pretendard', sans-serif; background: #ffffff; height: 100vh; overflow: hidden; }
-        #sidebar { width: 320px; background: #2c3e50; color: white; padding: 25px; box-sizing: border-box; overflow-y: auto; }
-        #canvas-container { flex: 1; position: relative; }
-        .control-group { margin-bottom: 20px; background: #34495e; padding: 15px; border-radius: 8px; border-left: 5px solid #2ecc71; }
-        label { display: block; margin-bottom: 10px; font-size: 14px; font-weight: bold; }
-        select { width: 100%; padding: 12px; border-radius: 5px; border: none; margin-bottom: 15px; font-size: 14px; background: #ecf0f1; cursor: pointer; color: #2c3e50; font-weight: bold; }
-        .summary-card { background: #34495e; padding: 15px; border-radius: 10px; border-left: 5px solid #f1c40f; line-height: 1.6; font-size: 13px; }
-        .v-label { position: absolute; background: rgba(0,0,0,0.9); color: white; padding: 6px 12px; border-radius: 20px; font-size: 11px; pointer-events: none; transform: translate(-50%, -100%); border: 1px solid #f1c40f; white-space: nowrap; }
+        #sidebar { width: 340px; background: #2c3e50; color: white; padding: 25px; box-sizing: border-box; overflow-y: auto; border-right: 2px solid #1a252f; }
+        #canvas-container { flex: 1; position: relative; background: #f8f9fa; }
+        .control-group { margin-bottom: 20px; background: #34495e; padding: 18px; border-radius: 12px; }
+        h2 { font-size: 20px; margin-top: 0; color: #2ecc71; border-bottom: 1px solid #555; padding-bottom: 10px; }
+        label { display: block; margin-bottom: 8px; font-size: 13px; color: #bdc3c7; font-weight: 500; }
+        select { width: 100%; padding: 12px; border-radius: 6px; border: none; margin-bottom: 15px; font-size: 14px; background: #ffffff; color: #2c3e50; font-weight: bold; cursor: pointer; }
+        .summary-card { background: #1a252f; padding: 15px; border-radius: 8px; border-left: 5px solid #f1c40f; line-height: 1.6; font-size: 13px; color: #ecf0f1; }
+        .v-label { position: absolute; background: rgba(44, 62, 80, 0.95); color: white; padding: 5px 12px; border-radius: 4px; font-size: 11px; pointer-events: none; border: 1px solid #f1c40f; white-space: nowrap; font-weight: bold; }
     </style>
 </head>
 <body>
 
 <div id="sidebar">
     <h2>🚚 스마트 배차 Pro</h2>
+    
     <div class="control-group">
-        <label>📦 적재 단수(Layer) 선택</label>
+        <label>🚛 1. 투입 차량 선택 (실시간 시트)</label>
+        <select id="vehicleSelect" onchange="runSimulation()">
+            <option value="">데이터 불러오는 중...</option>
+        </select>
+
+        <label>📦 2. 적재 방법 (단수 제한)</label>
         <select id="stackLimit" onchange="runSimulation()">
-            <option value="1">1단 적재 (바닥 전용)</option>
-            <option value="2">2단 적재 (최대 2층)</option>
-            <option value="3" selected>3단 적재 (최대 3층)</option>
-            <option value="99">제한 없음</option>
+            <option value="1">1단 적재 (바닥만 채우기)</option>
+            <option value="2">2단 적재 (최대 2층 쌓기)</option>
+            <option value="99" selected>제한 없음 (높이 끝까지)</option>
         </select>
     </div>
-    <div id="report" class="summary-card">옵션에 따라 차량이 자동 분할됩니다.</div>
+
+    <div id="report" class="summary-card">시트 데이터를 로드하고 있습니다...</div>
 </div>
-<div id="canvas-container"><div id="label-container"></div></div>
+
+<div id="canvas-container">
+    <div id="label-container"></div>
+</div>
 
 <script type="importmap">
     { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" } }
@@ -39,78 +49,64 @@
     import * as THREE from 'three';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
+    // 제공해주신 실제 CSV 링크 적용
     const V_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT3TqnJSKLXQldW8eyG85KpubspA4k9MZCsDuxnhyKNNpBTs0QCoRfM73j4CvA9-pGrSx0mq25ga42F/pub?gid=0&single=true&output=csv';
     const C_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT3TqnJSKLXQldW8eyG85KpubspA4k9MZCsDuxnhyKNNpBTs0QCoRfM73j4CvA9-pGrSx0mq25ga42F/pub?gid=1155672676&single=true&output=csv';
 
     let scene, camera, renderer, controls, vehicles = [], cargoList = [], labels = [];
-    const GAP = 10; 
+    const GAP = 1; // 1cm 여유
 
     async function init() {
-        scene = new THREE.Scene(); scene.background = new THREE.Color(0xffffff);
-        camera = new THREE.PerspectiveCamera(45, (window.innerWidth - 320) / window.innerHeight, 1, 10000000);
-        camera.position.set(60000, 45000, 60000);
+        scene = new THREE.Scene(); scene.background = new THREE.Color(0xf1f3f5);
+        camera = new THREE.PerspectiveCamera(45, (window.innerWidth - 340) / window.innerHeight, 1, 1000000);
+        camera.position.set(2000, 1500, 2000); 
         renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setSize(window.innerWidth - 320, window.innerHeight);
+        renderer.setSize(window.innerWidth - 340, window.innerHeight);
         document.getElementById('canvas-container').appendChild(renderer.domElement);
         controls = new OrbitControls(camera, renderer.domElement);
-        scene.add(new THREE.AmbientLight(0xffffff, 0.9));
-        const floor = new THREE.Mesh(new THREE.PlaneGeometry(5000000, 5000000), new THREE.MeshPhongMaterial({ color: 0xeeeeee }));
+        scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+        const light = new THREE.DirectionalLight(0xffffff, 0.4); light.position.set(1,2,1); scene.add(light);
+        
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(500000, 500000), new THREE.MeshPhongMaterial({ color: 0xdee2e6 }));
         floor.rotation.x = -Math.PI / 2; scene.add(floor);
+        
         await loadData();
         runSimulation();
         animate();
     }
 
     async function loadData() {
-        const [vRes, cRes] = await Promise.all([fetch(V_URL), fetch(C_URL)]);
-        vehicles = parseCSV(await vRes.text(), 'v');
-        cargoList = parseCSV(await cRes.text(), 'c');
+        try {
+            const [vText, cText] = await Promise.all([
+                fetch(V_URL).then(r => r.text()),
+                fetch(C_URL).then(r => r.text())
+            ]);
+            vehicles = parseCSV(vText, 'v');
+            cargoList = parseCSV(cText, 'c');
+            
+            const vSelect = document.getElementById('vehicleSelect');
+            vSelect.innerHTML = vehicles.map((v, i) => 
+                `<option value="${i}">${v.type} (${v.l}x${v.w}x${v.h} cm)</option>`
+            ).join('');
+        } catch (e) { document.getElementById('report').innerText = "데이터 로딩 오류! 시트 '웹에 게시' 상태를 확인하세요."; }
     }
 
     function parseCSV(text, type) {
         return text.split('\n').slice(1).map(row => {
             const cols = row.split(',').map(s => s.trim().replace(/"/g, ''));
+            if(cols.length < 4) return null;
             if(type === 'v') return { type: cols[0], l: parseFloat(cols[1]), w: parseFloat(cols[2]), h: parseFloat(cols[3]) };
             return { id: cols[0], l: parseFloat(cols[1]), w: parseFloat(cols[2]), h: parseFloat(cols[3]), qty: parseInt(cols[4]), color: cols[6] || '#3498db' };
-        }).filter(item => item && item.l > 0);
-    }
-
-    // 차량 선택 핵심 로직 (승급 시스템 적용)
-    function findBestVehicle(pendingCargo, sortedV, stackLimit) {
-        // 작은 차부터 탐색하며 "모두 다 실리는 차"가 있으면 선택
-        for (let v of sortedV) {
-            if (checkAllFit(v, pendingCargo, stackLimit)) return v;
-        }
-        // 다 실리는 차가 없으면 가장 큰 차(40ft)를 반환하여 분할 적재 시작
-        return sortedV[sortedV.length - 1];
-    }
-
-    function checkAllFit(vehicle, items, limit) {
-        let occupied = [];
-        let fitCount = 0;
-        for (let item of items) {
-            let placed = false;
-            for (let z = -vehicle.l/2+GAP; z <= vehicle.l/2-item.l-GAP; z += 300) {
-                for (let x = -vehicle.w/2+GAP; x <= vehicle.w/2-item.w-GAP; x += 300) {
-                    for (let y = 0; y <= vehicle.h-item.h; y += 300) {
-                        let layers = 0;
-                        if(y>0) occupied.forEach(p=>{if(!((x+item.w+GAP)<=p.x||x>=(p.x+p.w+GAP)||(z+item.l+GAP)<=p.z||z>=(p.z+p.l+GAP))&&p.y<y) layers++;});
-                        if(layers+1 > limit) continue;
-                        let coll = false;
-                        for(let p of occupied){if(!(x+item.w+GAP<=p.x||x>=p.x+p.w+GAP||y+item.h+GAP<=p.y||y>=p.y+p.h+GAP||z+item.l+GAP<=p.z||z>=p.z+p.l+GAP)){coll=true;break;}}
-                        if(!coll){occupied.push({x,y,z,w:item.w,h:item.h,l:item.l});placed=true;fitCount++;break;}
-                    }
-                    if(placed) break;
-                }
-                if(placed) break;
-            }
-        }
-        return fitCount === items.length;
+        }).filter(item => item && !isNaN(item.l));
     }
 
     window.runSimulation = function() {
-        if (!vehicles.length) return;
+        if (!vehicles.length || !cargoList.length) return;
+        
+        const selectedVIdx = document.getElementById('vehicleSelect').value;
+        const v = vehicles[selectedVIdx];
         const stackLimit = parseInt(document.getElementById('stackLimit').value);
+        
         labels.forEach(l => l.el.remove()); labels = [];
         const toRemove = [];
         scene.traverse(child => { if(child instanceof THREE.Group) toRemove.push(child); });
@@ -118,35 +114,37 @@
 
         let pending = [];
         cargoList.forEach(c => { for(let i=0; i<c.qty; i++) pending.push({...c}); });
-        pending.sort((a,b) => (b.l * b.w * b.h) - (a.l * a.w * a.h)); 
+        pending.sort((a,b) => (b.l * b.w) - (a.l * a.w)); 
 
-        let sortedV = [...vehicles].sort((a,b) => (a.l * a.w * a.h) - (b.l * b.w * b.h)); 
-        let vIdx = 0, offsetX = 0, results = [];
+        let vCounter = 0, offsetX = 0, results = [];
 
         while(pending.length > 0) {
-            // [수정] 현재 남은 짐에 대해 가장 적절한 차량을 고름
-            let v = findBestVehicle(pending, sortedV, stackLimit);
-            
             const group = new THREE.Group();
             let stillPending = [];
             let occupied = []; 
 
             pending.forEach(item => {
                 let placed = false;
-                // 전방 밀착 적재 (Z -> X -> Y 순서)
-                for (let y = 0; y <= v.h - item.h; y += 150) {
-                    for (let z = -v.l/2 + GAP; z <= v.l/2 - item.l - GAP; z += 150) {
-                        for (let x = -v.w/2 + GAP; x <= v.w/2 - item.w - GAP; x += 150) {
+                // Y(높이) -> Z(길이) -> X(폭) 순서로 적재 공간 탐색
+                for (let y = 0; y <= v.h - item.h; y += 2) {
+                    for (let z = -v.l/2 + GAP; z <= v.l/2 - item.l - GAP; z += 5) {
+                        for (let x = -v.w/2 + GAP; x <= v.w/2 - item.w - GAP; x += 5) {
                             let layers = 0;
-                            if(y>0) occupied.forEach(p => { if(!((x+item.w+GAP)<=p.x||x>=(p.x+p.w+GAP)||(z+item.l+GAP)<=p.z||z>=(p.z+p.l+GAP)) && p.y < y) layers++; });
+                            if(y>0) occupied.forEach(p => { 
+                                if(!((x+item.w+GAP)<=p.x||x>=(p.x+p.w+GAP)||(z+item.l+GAP)<=p.z||z>=(p.z+p.l+GAP)) && p.y < y) layers++; 
+                            });
                             if ((layers + 1) > stackLimit) continue;
+                            
                             let coll = false;
-                            for (let p of occupied) { if (!(x+item.w+GAP<=p.x||x>=p.x+p.w+GAP||y+item.h+GAP<=p.y||y>=p.y+p.h+GAP||z+item.l+GAP<=p.z||z>=(p.z+p.l+GAP))) { coll = true; break; } }
+                            for (let p of occupied) { 
+                                if (!(x+item.w+GAP<=p.x||x>=p.x+p.w+GAP||y+item.h+GAP<=p.y||y>=p.y+p.h+GAP||z+item.l+GAP<=p.z||z>=(p.z+p.l+GAP))) { coll = true; break; } 
+                            }
+                            
                             if (!coll) {
                                 const geo = new THREE.BoxGeometry(item.w, item.h, item.l).translate(0, item.h/2, 0);
                                 const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({color: item.color, transparent:true, opacity:0.85}));
                                 mesh.position.set(x + item.w/2, y, z + item.l/2);
-                                mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({color: 0x000000})));
+                                mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({color: 0x000000, opacity: 0.2, transparent: true})));
                                 group.add(mesh);
                                 occupied.push({x, y, z, w: item.w, h: item.h, l: item.l});
                                 placed = true; break;
@@ -159,23 +157,30 @@
                 if (!placed) stillPending.push(item);
             });
 
-            group.add(new THREE.BoxHelper(new THREE.Mesh(new THREE.BoxGeometry(v.w, v.h, v.l).translate(0, v.h/2, 0)), 0x2c3e50));
-            group.position.x = offsetX; scene.add(group);
-            results.push(`${vIdx+1}호차: ${v.type} (${pending.length-stillPending.length}개)`);
+            const truckGeo = new THREE.BoxGeometry(v.w, v.h, v.l).translate(0, v.h/2, 0);
+            group.add(new THREE.BoxHelper(new THREE.Mesh(truckGeo), 0x2c3e50));
+            group.position.x = offsetX;
+            scene.add(group);
+
+            results.push(`<b>${vCounter+1}호차</b>: ${pending.length - stillPending.length}개 적재`);
             const el = document.createElement('div'); el.className = 'v-label';
-            el.innerText = `${vIdx+1}호차: ${v.type}`; document.getElementById('label-container').appendChild(el);
-            labels.push({ el, pos: new THREE.Vector3(offsetX, v.h + 1500, 0) });
-            
-            pending = stillPending; offsetX += v.w + 12000; vIdx++;
-            if(vIdx > 15) break;
+            el.innerText = `${vCounter+1}호차 (${v.type})`; document.getElementById('label-container').appendChild(el);
+            labels.push({ el, pos: new THREE.Vector3(offsetX, v.h + 80, 0) });
+
+            pending = stillPending;
+            offsetX += v.w + 500; 
+            vCounter++;
+            if(vCounter > 30) break; 
         }
-        document.getElementById('report').innerHTML = "<b>[배차 요약]</b><br>" + results.join('<br>');
+        document.getElementById('report').innerHTML = "<b>[시뮬레이션 요약]</b><br>" + results.join('<br>');
     }
 
-    function animate() { requestAnimationFrame(animate); controls.update(); 
+    function animate() {
+        requestAnimationFrame(animate);
+        controls.update(); 
         labels.forEach(l => {
             const vector = l.pos.clone().project(camera);
-            l.el.style.left = (vector.x + 1) * (window.innerWidth - 320) / 2 + 'px';
+            l.el.style.left = (vector.x + 1) * (window.innerWidth - 340) / 2 + 'px';
             l.el.style.top = -(vector.y - 1) * window.innerHeight / 2 + 'px';
             l.el.style.display = vector.z < 1 ? 'block' : 'none';
         });
